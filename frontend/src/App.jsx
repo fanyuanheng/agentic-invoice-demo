@@ -297,10 +297,8 @@ export default function App() {
         if (agent) {
           const normalizedAgent = agent.replace(' Agent', '');
           setAgentStatus(prev => ({ ...prev, [normalizedAgent]: 'Complete' }));
-          // Move to next agent or clear active
-          setTimeout(() => {
-            setActiveAgent(null);
-          }, 1000);
+          // Don't clear activeAgent here - let the next agent_start set the new active agent
+          // This ensures smooth transitions between agents
         }
         break;
 
