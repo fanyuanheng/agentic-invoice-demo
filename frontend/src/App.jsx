@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AgentCard from './components/AgentCard';
 import FileDropZone from './components/FileDropZone';
+import LightTrails from './components/LightTrails';
+import ExecutiveSummary from './components/ExecutiveSummary';
+import HumanIntervention from './components/HumanIntervention';
 import { ArrowLeft } from 'lucide-react';
 import './App.css';
 
@@ -20,7 +23,28 @@ export default function App() {
   const [agentStatus, setAgentStatus] = useState({});
   const [isProcessing, setIsProcessing] = useState(false);
   const [showFeedbackLoop, setShowFeedbackLoop] = useState(false);
+  const [qualityConfidence, setQualityConfidence] = useState(null);
+  const [agenticDecisions, setAgenticDecisions] = useState([]);
+  const [workflowComplete, setWorkflowComplete] = useState(false);
+  const [humanIntervention, setHumanIntervention] = useState(null);
   const eventSourceRef = useRef(null);
+  
+  // Create refs for each agent card
+  const intakeRef = useRef(null);
+  const extractionRef = useRef(null);
+  const policyRef = useRef(null);
+  const glMapperRef = useRef(null);
+  const qualityRef = useRef(null);
+  const publisherRef = useRef(null);
+  
+  const agentRefs = {
+    'Intake': intakeRef,
+    'Extraction': extractionRef,
+    'Policy': policyRef,
+    'GL Mapper': glMapperRef,
+    'Quality': qualityRef,
+    'Publisher': publisherRef
+  };
 
   const clearAgentStates = () => {
     setActiveAgent(null);
@@ -34,6 +58,10 @@ export default function App() {
     });
     setAgentStatus({});
     setShowFeedbackLoop(false);
+    setQualityConfidence(null);
+    setAgenticDecisions([]);
+    setWorkflowComplete(false);
+    setHumanIntervention(null);
   };
 
   const handleFileSelect = async (base64Image) => {
@@ -92,7 +120,8 @@ export default function App() {
   };
 
   const handleSSEEvent = (data) => {
-    const { type, agent, content, phase, message, result, errors } = data;
+    try {
+      const { type, agent, content, phase, message, result, errors } = data || {};
 
     switch (type) {
       case 'workflow_start':
@@ -132,30 +161,124 @@ export default function App() {
 
       case 'agent_result':
         if (agent && result) {
-          const normalizedAgent = agent.replace(' Agent', '');
+          try {
+            const normalizedAgent = agent.replace(' Agent', '');
+            
+            // Safely stringify result, handling circular references or large objects
+            let resultString = '';
+            try {
+              resultString = JSON.stringify(result, null, 2);
+            } catch (e) {
+              // If stringify fails, create a safe representation
+              resultString = typeof result === 'object' 
+                ? JSON.stringify({ 
+                    type: typeof result,
+                    keys: Object.keys(result || {}),
+                    message: 'Result data (unable to stringify fully)'
+                  }, null, 2)
+                : String(result);
+            }
+            
+            setAgentThoughts(prev => ({
+              ...prev,
+              [normalizedAgent]: (prev[normalizedAgent] || '') + `\n\n[Result] ${resultString}\n`
+            }));
+            
+            // Extract confidence score for Quality Agent
+            if (normalizedAgent === 'Quality' && result.confidence !== undefined) {
+              setQualityConfidence(result.confidence);
+            } else if (normalizedAgent === 'Quality' && result.verified !== undefined) {
+              // Calculate confidence based on verification status
+              // If verified with no errors, high confidence; if errors found, lower confidence
+              const calculatedConfidence = result.errors && Array.isArray(result.errors) && result.errors.length > 0 
+                ? Math.max(0, 100 - (result.errors.length * 20))
+                : 95;
+              setQualityConfidence(calculatedConfidence);
+            }
+          } catch (error) {
+            console.error('Error handling agent result:', error);
+          }
+        }
+        break;
+
+      case 'human_intervention_required':
+        try {
+          // Validate data before setting state
+          if (!data.interventionId) {
+            console.error('human_intervention_required: Missing interventionId', data);
+            break;
+          }
+          
+          // Safely extract and sanitize extractedData to ensure all values are primitives
+          const rawExtractedData = data.extractedData || {};
+          const sanitizedExtractedData = {
+            vendor: typeof rawExtractedData.vendor === 'string' || typeof rawExtractedData.vendor === 'number' 
+              ? String(rawExtractedData.vendor) 
+              : 'N/A',
+            invoiceNumber: typeof rawExtractedData.invoiceNumber === 'string' || typeof rawExtractedData.invoiceNumber === 'number'
+              ? String(rawExtractedData.invoiceNumber)
+              : 'N/A',
+            date: typeof rawExtractedData.date === 'string' || typeof rawExtractedData.date === 'number'
+              ? String(rawExtractedData.date)
+              : 'N/A',
+            subtotal: typeof rawExtractedData.subtotal === 'number' ? rawExtractedData.subtotal : null,
+            tax: typeof rawExtractedData.tax === 'number' ? rawExtractedData.tax : null,
+            total: typeof rawExtractedData.total === 'number' ? rawExtractedData.total : null,
+            lineItems: Array.isArray(rawExtractedData.lineItems) ? rawExtractedData.lineItems : []
+          };
+          
+          const interventionData = {
+            errors: Array.isArray(data.errors) ? data.errors.map(e => String(e || '')) : [],
+            extractedData: sanitizedExtractedData,
+            interventionId: String(data.interventionId),
+            message: String(data.message || 'Quality Agent detected calculation errors that require human review')
+          };
+          
+          setHumanIntervention(interventionData);
+          setAgentStatus(prev => ({ ...prev, 'Quality': 'Waiting for human decision...' }));
           setAgentThoughts(prev => ({
             ...prev,
-            [normalizedAgent]: (prev[normalizedAgent] || '') + `\n\n[Result] ${JSON.stringify(result, null, 2)}\n`
+            'Quality': (prev['Quality'] || '') + `\n\n[Human Intervention Required] ${interventionData.errors.length} calculation error(s) detected. Waiting for human decision...\n`
+          }));
+        } catch (error) {
+          console.error('Error handling human intervention:', error, data);
+          // Don't crash - show error message instead
+          setAgentThoughts(prev => ({
+            ...prev,
+            'Quality': (prev['Quality'] || '') + `\n\n[Error] Failed to display intervention modal: ${error.message}\n`
           }));
         }
         break;
 
-      case 'correction_loop':
-        if (agent === 'Quality Agent' && errors) {
-          setShowFeedbackLoop(true);
+      case 'intervention_pending':
+        // Workflow is paused, waiting for user decision
+        setAgentStatus(prev => ({ ...prev, 'Quality': 'Waiting for human decision...' }));
+        break;
+
+      case 'intervention_decision':
+        if (data.decision === 'accepted') {
+          setHumanIntervention(null);
+          setAgentStatus(prev => ({ ...prev, 'Quality': 'Proceeding after user acceptance...' }));
           setAgentThoughts(prev => ({
             ...prev,
-            'Quality': prev['Quality'] + `\n\n[Feedback Loop] Sending ${errors.length} error(s) back to Extraction Agent for correction...\n`
+            'Quality': (prev['Quality'] || '') + `\n\n[Decision] User accepted data with errors. Workflow continuing...\n`
           }));
-          // Temporarily activate Extraction agent to show the feedback
-          setTimeout(() => {
-            setActiveAgent('Extraction');
-            setAgentThoughts(prev => ({
-              ...prev,
-              'Extraction': prev['Extraction'] + `\n\n[Correction Request] Quality Agent found errors:\n${errors.map(e => `- ${e}`).join('\n')}\n\nRe-extracting with corrections...\n`
-            }));
-          }, 500);
+          // Keep isProcessing true so workflow can continue
+        } else if (data.decision === 'declined') {
+          setHumanIntervention(null);
+          setIsProcessing(false);
+          setActiveAgent(null);
+          setAgentStatus(prev => ({ ...prev, 'Quality': 'Stopped by user' }));
+          setAgentThoughts(prev => ({
+            ...prev,
+            'Quality': (prev['Quality'] || '') + `\n\n[Decision] User declined to proceed. Workflow stopped.\n`
+          }));
         }
+        break;
+
+      case 'workflow_stopped':
+        setIsProcessing(false);
+        setActiveAgent(null);
         break;
 
       case 'agent_complete':
@@ -179,6 +302,11 @@ export default function App() {
           });
           return updated;
         });
+        // Set agentic decisions and mark workflow as complete
+        if (data.agenticDecisions) {
+          setAgenticDecisions(data.agenticDecisions);
+        }
+        setWorkflowComplete(true);
         break;
 
       case 'error':
@@ -190,6 +318,10 @@ export default function App() {
         setIsProcessing(false);
         setActiveAgent(null);
         break;
+    }
+    } catch (error) {
+      console.error('Error in handleSSEEvent:', error, data);
+      // Don't crash the app, just log the error
     }
   };
 
@@ -230,14 +362,31 @@ export default function App() {
 
         {/* Agent Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8 relative">
+          {/* Light Trails SVG Overlay */}
+          {isProcessing && (
+            <LightTrails
+              agentRefs={agentRefs}
+              activeAgent={activeAgent}
+              isCorrectionLoop={showFeedbackLoop}
+              onAnimationComplete={() => {
+                // Animation complete callback
+              }}
+            />
+          )}
+          
           {AGENTS.map((agent, index) => (
-            <div key={agent} className="relative">
+            <div 
+              key={agent} 
+              className="relative z-10"
+              ref={agentRefs[agent]}
+            >
               <AgentCard
                 agentName={agent}
                 isActive={activeAgent === agent}
                 thoughtStream={agentThoughts[agent]}
                 status={agentStatus[agent]}
                 isFeedbackLoop={showFeedbackLoop && (agent === 'Quality' || agent === 'Extraction')}
+                confidence={agent === 'Quality' ? qualityConfidence : null}
               />
               
               {/* Feedback Loop Indicator - Quality to Extraction */}
@@ -303,7 +452,43 @@ export default function App() {
             </div>
           </motion.div>
         )}
+
+        {/* Executive Summary Panel */}
+        <ExecutiveSummary 
+          agenticDecisions={agenticDecisions}
+          isVisible={workflowComplete}
+        />
       </div>
+
+      {/* Human Intervention Modal */}
+      <HumanIntervention
+        intervention={humanIntervention}
+        onDecision={async (interventionId, decision) => {
+          try {
+            const response = await fetch('http://localhost:3001/api/workflow/intervention', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                interventionId,
+                decision
+              })
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            console.log('Intervention decision result:', result);
+          } catch (error) {
+            console.error('Error sending intervention decision:', error);
+            // Still clear the intervention UI even if there's an error
+            setHumanIntervention(null);
+          }
+        }}
+      />
     </div>
   );
 }

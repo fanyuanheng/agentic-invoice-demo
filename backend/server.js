@@ -6,6 +6,9 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Store for pending workflow interventions
+const pendingInterventions = new Map();
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -102,14 +105,9 @@ Think through each of these checks systematically.`;
   
   sendSSE(res, 'agent_result', { agent: 'Intake Agent', result: intakeResult });
   
-  // Reflection phase
-  const reflectionPrompt = `Reflect on the intake process. Did you identify any issues? If warnings were raised, explain why you're proceeding despite them, or if you should stop.`;
-  
-  const reflection = await streamReasoning(model, reflectionPrompt, null, res, 'Intake Agent', 'Reflection');
-  
   sendSSE(res, 'agent_complete', { agent: 'Intake Agent' });
   
-  return { intakeResult, reasoning, reflection };
+  return { intakeResult, reasoning };
 }
 
 // Agent 2: Extraction Agent
@@ -173,29 +171,9 @@ Be precise with numbers. Extract exactly what you see.`;
   
   sendSSE(res, 'agent_result', { agent: 'Extraction Agent', result: extractedData });
   
-  // Reflection phase
-  const reflectionPrompt = `Reflect on your extraction. List any fields you're not 100% confident about. For each ambiguous field, explain:
-1. Why you're uncertain
-2. What alternative interpretations exist
-3. Your confidence level (0-100%)`;
-  
-  const reflection = await streamReasoning(model, reflectionPrompt, imagePart, res, 'Extraction Agent', 'Reflection');
-  
-  // Extract ambiguous fields from reflection
-  let ambiguousFields = [];
-  if (reflection.toLowerCase().includes('uncertain') || reflection.toLowerCase().includes('ambiguous')) {
-    // Try to identify which fields are mentioned
-    Object.keys(extractedData).forEach(key => {
-      if (reflection.toLowerCase().includes(key.toLowerCase())) {
-        ambiguousFields.push(key);
-      }
-    });
-  }
-  
-  sendSSE(res, 'agent_result', { agent: 'Extraction Agent', ambiguousFields });
   sendSSE(res, 'agent_complete', { agent: 'Extraction Agent' });
   
-  return { extractedData, reasoning, reflection, ambiguousFields };
+  return { extractedData, reasoning };
 }
 
 // Agent 3: Policy Agent
@@ -265,14 +243,9 @@ Think about which policies apply to this invoice and what the consequences would
   
   sendSSE(res, 'agent_result', { agent: 'Policy Agent', result: policyResult });
   
-  // Reflection phase
-  const reflectionPrompt = `Reflect on the policy check. Are the corrective actions appropriate? Should this invoice be blocked or can it proceed with approvals?`;
-  
-  const reflection = await streamReasoning(model, reflectionPrompt, null, res, 'Policy Agent', 'Reflection');
-  
   sendSSE(res, 'agent_complete', { agent: 'Policy Agent' });
   
-  return { policyResult, reasoning, reflection };
+  return { policyResult, reasoning };
 }
 
 // Agent 4: GL Mapper Agent
@@ -298,30 +271,42 @@ ${Object.entries(glCodes).map(([name, code]) => `- ${name}: ${code}`).join('\n')
 Think about:
 1. What type of expense does this invoice represent?
 2. Which GL code best matches the vendor and line items?
-3. What contextual clues in the invoice help you decide?`;
+3. What contextual clues in the invoice help you decide?
+4. Consider historical patterns - what GL codes have been used for similar vendors/expenses in the past?`;
   
   const dataContext = JSON.stringify(extractedData, null, 2);
   const reasoning = await streamReasoning(model, `${reasoningPrompt}\n\nInvoice Data:\n${dataContext}`, null, res, 'GL Mapper Agent', 'Reasoning');
   
   // Action phase
-  sendSSE(res, 'agent_action', { agent: 'GL Mapper Agent', message: 'Predicting GL code based on invoice context...' });
+  sendSSE(res, 'agent_action', { agent: 'GL Mapper Agent', message: 'Predicting GL code based on invoice context and historical patterns...' });
   
-  const mappingPrompt = `Based on the invoice data, predict the GL code. Return JSON:
+  const mappingPrompt = `Based on the invoice data and historical context, predict the GL code. Return JSON:
 {
   "glCode": "code",
   "glCategory": "category name",
   "confidence": number (0-100),
-  "reasoning": "explanation of why this code was chosen"
+  "reasoning": "explanation of why this code was chosen, including any historical context used"
 }`;
   
   const mappingResult = await model.generateContent([`${mappingPrompt}\n\nInvoice Data:\n${dataContext}`]);
   const mappingText = mappingResult.response.text();
   
   let glMapping = { glCode: '6999', glCategory: 'OTHER', confidence: 50, reasoning: 'Default mapping' };
+  let usedHistoricalContext = false;
+  
   try {
     const jsonMatch = mappingText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       glMapping = JSON.parse(jsonMatch[0]);
+      // Check if reasoning mentions historical context
+      if (glMapping.reasoning && (
+        glMapping.reasoning.toLowerCase().includes('historical') ||
+        glMapping.reasoning.toLowerCase().includes('previous') ||
+        glMapping.reasoning.toLowerCase().includes('past') ||
+        glMapping.reasoning.toLowerCase().includes('similar')
+      )) {
+        usedHistoricalContext = true;
+      }
     }
   } catch (e) {
     // Fallback: try to infer from vendor/description
@@ -335,24 +320,26 @@ Think about:
     }
   }
   
+  // Add historical context flag to mapping
+  glMapping.usedHistoricalContext = usedHistoricalContext;
+  
   sendSSE(res, 'agent_result', { agent: 'GL Mapper Agent', result: glMapping });
   
-  // Reflection phase (already done in reasoning, but we'll add a summary)
   sendSSE(res, 'agent_complete', { agent: 'GL Mapper Agent' });
   
-  return { glMapping, reasoning };
+  return { glMapping, reasoning, usedHistoricalContext };
 }
 
 // Agent 5: Quality Agent (The Self-Corrector)
-async function qualityAgent(extractedData, model, res, imageData, mimeType) {
+async function qualityAgent(extractedData, model, res, imageData, mimeType, interventionId = null) {
   sendSSE(res, 'agent_start', { agent: 'Quality Agent', step: 5 });
   
   // Reasoning phase
-  const reasoningPrompt = `You are the Quality Agent - the self-corrector. Your job is to:
+  const reasoningPrompt = `You are the Quality Agent - the validator. Your job is to:
 1. Mathematically verify tax and totals
 2. Check for calculation errors
 3. Verify data consistency
-4. If errors are found, send the task back to Extraction Agent for correction
+4. If errors are found, flag them for human-in-the-loop review (do not auto-correct)
 
 Think about what calculations you need to verify.`;
   
@@ -364,6 +351,10 @@ Think about what calculations you need to verify.`;
   
   const errors = [];
   const warnings = [];
+  let selfCorrected = false;
+  let correctionDetails = null;
+  let requiresIntervention = false;
+  let interventionData = null;
   
   // Verify line items sum
   if (extractedData.lineItems && Array.isArray(extractedData.lineItems)) {
@@ -395,71 +386,49 @@ Think about what calculations you need to verify.`;
     }
   }
   
-  // If errors found, send back to Extraction Agent
+  // If errors found, flag for human intervention instead of auto-correcting
   if (errors.length > 0) {
+    const originalTotal = extractedData.total;
+    
     sendSSE(res, 'agent_action', { 
       agent: 'Quality Agent', 
-      message: `Found ${errors.length} calculation error(s). Sending back to Extraction Agent for correction...` 
+      message: `Found ${errors.length} calculation error(s). Flagging for human-in-the-loop intervention.` 
     });
     
-    sendSSE(res, 'correction_loop', { 
-      agent: 'Quality Agent',
-      errors,
-      message: 'Initiating correction loop with Extraction Agent'
-    });
-    
-    // Re-extract with error feedback
-    const correctionPrompt = `Previous extraction had these calculation errors:
-${errors.join('\n')}
-
-Please re-extract the invoice data, paying special attention to:
-1. Line item calculations (quantity × unitPrice = amount)
-2. Subtotal (sum of all line item amounts)
-3. Tax calculation (subtotal × taxRate)
-4. Total (subtotal + tax)
-
-Return the corrected JSON with the same structure.`;
-    
-    const imagePart = {
-      inlineData: {
-        data: imageData,
-        mimeType: mimeType
+    requiresIntervention = true;
+    interventionData = {
+      errors: Array.isArray(errors) ? errors : [],
+      extractedData: {
+        vendor: extractedData.vendor,
+        invoiceNumber: extractedData.invoiceNumber,
+        date: extractedData.date,
+        subtotal: extractedData.subtotal,
+        tax: extractedData.tax,
+        total: extractedData.total,
+        lineItems: extractedData.lineItems
       }
     };
     
-    const correctedResult = await model.generateContent([correctionPrompt, imagePart]);
-    const correctedText = correctedResult.response.text();
-    
-    let correctedData = extractedData;
-    try {
-      const jsonMatch = correctedText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        correctedData = JSON.parse(jsonMatch[0]);
-      }
-    } catch (e) {
-      sendSSE(res, 'error', { agent: 'Quality Agent', message: 'Failed to parse corrected extraction' });
-    }
-    
-    sendSSE(res, 'agent_result', { agent: 'Quality Agent', correctedData, originalErrors: errors });
-    
-    // Verify corrections
-    const verificationErrors = [];
-    if (correctedData.lineItems && Array.isArray(correctedData.lineItems)) {
-      const calculatedSubtotal = correctedData.lineItems.reduce((sum, item) => {
-        return sum + (item.quantity * item.unitPrice);
-      }, 0);
-      const subtotalDiff = Math.abs(calculatedSubtotal - (correctedData.subtotal || 0));
-      if (subtotalDiff > 0.01) {
-        verificationErrors.push('Subtotal still incorrect after correction');
-      }
-    }
-    
-    if (verificationErrors.length === 0) {
-      sendSSE(res, 'agent_action', { agent: 'Quality Agent', message: 'Corrections verified. Data is now accurate.' });
-      extractedData = correctedData; // Update with corrected data
+    // Send human intervention required event
+    // Ensure interventionId is set
+    if (!interventionId) {
+      console.error('Quality Agent: interventionId is missing when errors detected');
+      sendSSE(res, 'error', { 
+        agent: 'Quality Agent', 
+        message: 'Failed to create intervention - missing interventionId' 
+      });
     } else {
-      warnings.push('Some errors may remain after correction');
+      sendSSE(res, 'human_intervention_required', {
+        agent: 'Quality Agent',
+        interventionId: interventionId,
+        errors: Array.isArray(errors) ? errors : [],
+        extractedData: interventionData.extractedData || {},
+        message: 'Quality Agent detected calculation errors that require human review'
+      });
     }
+    
+    // Store intervention data for later use
+    warnings.push(`Human intervention required: ${errors.length} calculation error(s) detected`);
   } else {
     sendSSE(res, 'agent_action', { agent: 'Quality Agent', message: 'All calculations verified. No errors found.' });
   }
@@ -468,23 +437,28 @@ Return the corrected JSON with the same structure.`;
     verified: errors.length === 0,
     errors,
     warnings,
-    correctionsApplied: errors.length > 0
+    correctionsApplied: false, // No auto-corrections, only human intervention
+    selfCorrected: false, // No self-correction, only human intervention
+    correctionDetails: null,
+    requiresIntervention: requiresIntervention
   };
   
   sendSSE(res, 'agent_result', { agent: 'Quality Agent', result: qualityResult });
   
-  // Reflection phase
-  const reflectionPrompt = `Reflect on the quality check. Were the corrections successful? Is the data now reliable for processing?`;
+  // Only mark as complete if no intervention is required
+  // If intervention is required, we'll mark it complete after user decision
+  if (!requiresIntervention) {
+    sendSSE(res, 'agent_complete', { agent: 'Quality Agent' });
+  } else {
+    // Don't mark complete yet - wait for human decision
+    sendSSE(res, 'agent_action', { agent: 'Quality Agent', message: 'Waiting for human review and decision...' });
+  }
   
-  const reflection = await streamReasoning(model, reflectionPrompt, null, res, 'Quality Agent', 'Reflection');
-  
-  sendSSE(res, 'agent_complete', { agent: 'Quality Agent' });
-  
-  return { qualityResult, reasoning, reflection, finalData: extractedData };
+  return { qualityResult, reasoning, finalData: extractedData, selfCorrected: false, correctionDetails: null, requiresIntervention, interventionData };
 }
 
 // Agent 6: Publisher Agent
-async function publisherAgent(finalData, glMapping, policyResult, model, res) {
+async function publisherAgent(finalData, glMapping, policyResult, model, res, agenticDecisions) {
   sendSSE(res, 'agent_start', { agent: 'Publisher Agent', step: 6 });
   
   // Reasoning phase
@@ -528,17 +502,60 @@ async function publisherAgent(finalData, glMapping, policyResult, model, res) {
   
   sendSSE(res, 'agent_result', { agent: 'Publisher Agent', result: sheetsPayload });
   
-  // Reflection phase
-  const reflectionPrompt = `Reflect on the final payload. Is it complete? Will it be easy to import into Google Sheets?`;
+  // Simulate Google Sheets append operation
+  sendSSE(res, 'agent_action', { agent: 'Publisher Agent', message: 'Connecting to Google Sheets API...' });
   
-  const reflection = await streamReasoning(model, reflectionPrompt, null, res, 'Publisher Agent', 'Reflection');
+  // Simulate API call delay
+  await new Promise(resolve => setTimeout(resolve, 800));
+  
+  sendSSE(res, 'agent_action', { agent: 'Publisher Agent', message: 'Appending row to spreadsheet...' });
+  
+  // Simulate append operation
+  const sheetId = '1a2b3c4d5e6f7g8h9i0j'; // Mock sheet ID
+  const sheetName = 'Invoice_Processing';
+  const rowData = [
+    sheetsPayload.timestamp,
+    sheetsPayload.vendor,
+    sheetsPayload.invoiceNumber,
+    sheetsPayload.date,
+    sheetsPayload.dueDate,
+    sheetsPayload.subtotal,
+    sheetsPayload.tax,
+    sheetsPayload.taxRate,
+    sheetsPayload.total,
+    sheetsPayload.currency,
+    sheetsPayload.glCode,
+    sheetsPayload.glCategory,
+    sheetsPayload.policyApproved ? 'Yes' : 'No',
+    sheetsPayload.policyViolations,
+    sheetsPayload.lineItemsCount
+  ];
+  
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  sendSSE(res, 'agent_result', { 
+    agent: 'Publisher Agent', 
+    result: {
+      ...sheetsPayload,
+      sheetsAppend: {
+        success: true,
+        sheetId,
+        sheetName,
+        rowNumber: Math.floor(Math.random() * 1000) + 1, // Simulated row number
+        timestamp: new Date().toISOString()
+      }
+    }
+  });
   
   sendSSE(res, 'agent_complete', { agent: 'Publisher Agent' });
   
-  // Send final complete payload
-  sendSSE(res, 'workflow_complete', { payload: sheetsPayload });
+  // Send final complete payload with agentic decisions
+  sendSSE(res, 'workflow_complete', { 
+    payload: sheetsPayload,
+    agenticDecisions: agenticDecisions || []
+  });
   
-  return { sheetsPayload, reasoning, reflection };
+  return { sheetsPayload, reasoning };
 }
 
 // SSE endpoint for workflow streaming
@@ -605,23 +622,74 @@ app.post('/api/workflow/stream', async (req, res) => {
 
     sendSSE(res, 'workflow_start', { message: 'Starting 6-agent workflow' });
 
+    // Track agentic decisions throughout the workflow
+    const agenticDecisions = [];
+
     // Agent 1: Intake Agent
     const { intakeResult } = await intakeAgent(imageData, mimeType, imageBuffer, model, res);
 
     // Agent 2: Extraction Agent
-    const { extractedData, ambiguousFields } = await extractionAgent(imageData, mimeType, model, res);
+    const { extractedData } = await extractionAgent(imageData, mimeType, model, res);
 
     // Agent 3: Policy Agent
     const { policyResult } = await policyAgent(extractedData, model, res);
 
     // Agent 4: GL Mapper Agent
-    const { glMapping } = await glMapperAgent(extractedData, model, res);
+    const { glMapping, usedHistoricalContext } = await glMapperAgent(extractedData, model, res);
+    
+    // Track GL mapping decision if historical context was used
+    if (usedHistoricalContext) {
+      agenticDecisions.push({
+        agent: 'GL Mapper',
+        decision: 'Automated GL mapping based on historical context',
+        details: `Mapped to ${glMapping.glCategory} (${glMapping.glCode}) using historical patterns and vendor context`,
+        confidence: glMapping.confidence
+      });
+    }
 
-    // Agent 5: Quality Agent (may trigger correction loop)
-    const { finalData } = await qualityAgent(extractedData, model, res, imageData, mimeType);
+    // Generate unique intervention ID
+    const interventionId = `intervention_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Agent 5: Quality Agent (may flag for human intervention)
+    const { finalData, selfCorrected, correctionDetails, requiresIntervention, interventionData } = await qualityAgent(extractedData, model, res, imageData, mimeType, interventionId);
+    
+    // If human intervention is required, pause workflow and wait for user decision
+    if (requiresIntervention && interventionData) {
+      // Store workflow state for resumption
+      pendingInterventions.set(interventionId, {
+        extractedData: finalData,
+        glMapping,
+        policyResult,
+        agenticDecisions,
+        imageData,
+        mimeType,
+        model,
+        res,
+        interventionData
+      });
+      
+      // Send intervention ID to frontend
+      sendSSE(res, 'intervention_pending', {
+        interventionId,
+        message: 'Workflow paused. Waiting for human decision...'
+      });
+      
+      // Don't proceed until user makes a decision
+      return;
+    }
+    
+    // Track self-correction decision if it occurred (for future use if we add auto-correction back)
+    if (selfCorrected && correctionDetails) {
+      agenticDecisions.push({
+        agent: 'Quality',
+        decision: 'Self-corrected total amount',
+        details: `Detected calculation errors (${correctionDetails.errorsFound.length} issue(s)) and automatically corrected via feedback loop. Original total: $${correctionDetails.originalTotal}, Corrected total: $${correctionDetails.correctedTotal}`,
+        impact: 'Data accuracy improved through autonomous correction'
+      });
+    }
 
     // Agent 6: Publisher Agent
-    await publisherAgent(finalData, glMapping, policyResult, model, res);
+    await publisherAgent(finalData, glMapping, policyResult, model, res, agenticDecisions);
 
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
     res.end();
@@ -635,6 +703,77 @@ app.post('/api/workflow/stream', async (req, res) => {
       res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
       res.end();
     }
+  }
+});
+
+// API endpoint to handle human intervention decision
+app.post('/api/workflow/intervention', async (req, res) => {
+  try {
+    const { interventionId, decision, correctedData } = req.body;
+
+    if (!interventionId || !decision) {
+      return res.status(400).json({ error: 'interventionId and decision are required' });
+    }
+
+    const intervention = pendingInterventions.get(interventionId);
+    if (!intervention) {
+      return res.status(404).json({ error: 'Intervention not found or already processed' });
+    }
+
+    const { extractedData, glMapping, policyResult, agenticDecisions, imageData, mimeType, model, res: originalRes, interventionData: storedInterventionData } = intervention;
+
+    if (decision === 'accept') {
+      // User accepted the data despite errors - proceed with workflow
+      sendSSE(originalRes, 'intervention_decision', {
+        decision: 'accepted',
+        message: 'User accepted data with errors. Proceeding with workflow...'
+      });
+
+      // Mark Quality Agent as complete now that user has made decision
+      sendSSE(originalRes, 'agent_complete', { agent: 'Quality Agent' });
+
+      // Track the human decision
+      agenticDecisions.push({
+        agent: 'Quality',
+        decision: 'Human-in-the-loop: Accepted data with errors',
+        details: `User reviewed and accepted invoice data despite ${storedInterventionData.errors.length} calculation error(s). Original total: $${extractedData.total}`,
+        impact: 'Workflow continued with user approval'
+      });
+
+      // Continue with Publisher Agent
+      await publisherAgent(extractedData, glMapping, policyResult, model, originalRes, agenticDecisions);
+
+      originalRes.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      originalRes.end();
+
+    } else if (decision === 'decline') {
+      // User declined - stop workflow
+      sendSSE(originalRes, 'intervention_decision', {
+        decision: 'declined',
+        message: 'User declined to proceed. Workflow stopped.'
+      });
+
+      // Mark Quality Agent as complete (with declined status)
+      sendSSE(originalRes, 'agent_complete', { agent: 'Quality Agent' });
+
+      sendSSE(originalRes, 'workflow_stopped', {
+        reason: 'User declined to proceed with data containing errors'
+      });
+
+      originalRes.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      originalRes.end();
+    } else {
+      return res.status(400).json({ error: 'Invalid decision. Must be "accept" or "decline"' });
+    }
+
+    // Remove from pending interventions
+    pendingInterventions.delete(interventionId);
+
+    res.json({ success: true, message: `Workflow ${decision === 'accept' ? 'continued' : 'stopped'}` });
+
+  } catch (error) {
+    console.error('Error handling intervention:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

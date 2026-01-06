@@ -1,5 +1,5 @@
-import { motion } from 'framer-motion';
-import { useEffect, useRef } from 'react';
+import { motion, useMotionValue, useTransform, animate, useMotionValueEvent } from 'framer-motion';
+import { useEffect, useRef, useState } from 'react';
 import { 
   FileCheck, 
   FileText, 
@@ -230,7 +230,66 @@ const agentColors = {
   'Publisher': 'from-indigo-500/20 to-violet-500/20'
 };
 
-export default function AgentCard({ agentName, isActive, thoughtStream, status, isFeedbackLoop }) {
+// Confidence Meter Component
+function ConfidenceMeter({ confidence }) {
+  const count = useMotionValue(0);
+  const widthPercent = useTransform(count, (value) => `${Math.min(100, Math.max(0, value))}%`);
+  const [displayValue, setDisplayValue] = useState(0);
+
+  // Subscribe to motion value changes to update display value
+  useMotionValueEvent(count, "change", (latest) => {
+    setDisplayValue(Math.round(latest));
+  });
+
+  useEffect(() => {
+    if (confidence !== null && confidence !== undefined) {
+      const controls = animate(count, confidence, {
+        duration: 2,
+        ease: 'easeOut'
+      });
+      return controls.stop;
+    } else {
+      count.set(0);
+      setDisplayValue(0);
+    }
+  }, [confidence, count]);
+
+  if (confidence === null || confidence === undefined) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 flex-shrink-0">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-white/70 font-semibold uppercase tracking-wide">
+          Confidence Score
+        </span>
+        <span className="text-lg font-bold text-yellow-300 tabular-nums">
+          {displayValue}%
+        </span>
+      </div>
+      <div className="relative h-3 bg-black/30 rounded-full overflow-hidden border border-white/10">
+        <motion.div
+          className="absolute inset-y-0 left-0 bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-300 rounded-full"
+          style={{ width: widthPercent }}
+        />
+        <motion.div
+          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+          animate={{
+            x: ['-100%', '200%']
+          }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: 'linear'
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function AgentCard({ agentName, isActive, thoughtStream, status, isFeedbackLoop, confidence }) {
   const Icon = agentIcons[agentName] || FileCheck;
   const gradient = agentColors[agentName] || 'from-gray-500/20 to-gray-600/20';
 
@@ -278,6 +337,11 @@ export default function AgentCard({ agentName, isActive, thoughtStream, status, 
             </span>
           )}
         </div>
+
+        {/* Confidence Meter - Only for Quality Agent */}
+        {agentName === 'Quality' && (
+          <ConfidenceMeter confidence={confidence} />
+        )}
 
         {/* Thought Stream - Fixed height with scrolling */}
         <div className="flex-1 bg-black/20 rounded-lg p-4 border border-white/5 overflow-hidden flex flex-col min-h-0">
