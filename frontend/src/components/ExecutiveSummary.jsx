@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, CheckCircle2, TrendingUp, Zap } from 'lucide-react';
+import { Sparkles, CheckCircle2, TrendingUp, Zap, FileText, DollarSign, Calendar, Building2, Hash, Shield, Send } from 'lucide-react';
 
-export default function ExecutiveSummary({ agenticDecisions, isVisible }) {
+export default function ExecutiveSummary({ agenticDecisions, publisherPayload, isVisible }) {
   if (!isVisible) {
     return null;
   }
@@ -149,11 +149,183 @@ export default function ExecutiveSummary({ agenticDecisions, isVisible }) {
                 )}
               </div>
 
+              {/* Publisher Payload - Extracted Data for Submission */}
+              {publisherPayload && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: agenticDecisions.length * 0.1 + 0.2 }}
+                  className="mt-6 pt-6 border-t border-emerald-500/20"
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide mb-4">
+                    <Send className="w-4 h-4 text-purple-400" style={{ filter: 'drop-shadow(0 0 6px rgba(168, 85, 247, 0.6))' }} />
+                    <span className="text-purple-400" style={{ textShadow: '0 0 8px rgba(168, 85, 247, 0.5)' }}>Data Ready for Submission</span>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    {/* Invoice Header Information */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-lg border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-4 backdrop-blur-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Building2 className="w-4 h-4 text-purple-300" />
+                          <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">Vendor Information</span>
+                        </div>
+                        <div className="text-white font-semibold text-lg mb-1">{publisherPayload.vendor || 'N/A'}</div>
+                        <div className="text-white/60 text-sm">Invoice #{publisherPayload.invoiceNumber || 'N/A'}</div>
+                      </div>
+                      
+                      <div className="rounded-lg border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-4 backdrop-blur-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Calendar className="w-4 h-4 text-purple-300" />
+                          <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">Dates</span>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-white text-sm">
+                            <span className="text-white/60">Invoice Date: </span>
+                            {publisherPayload.date || 'N/A'}
+                          </div>
+                          {publisherPayload.dueDate && (
+                            <div className="text-white text-sm">
+                              <span className="text-white/60">Due Date: </span>
+                              {publisherPayload.dueDate}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Financial Summary */}
+                    <div className="rounded-lg border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-4 backdrop-blur-sm">
+                      <div className="flex items-center gap-2 mb-3">
+                        <DollarSign className="w-4 h-4 text-purple-300" />
+                        <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">Financial Summary</span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                          <div className="text-white/60 text-xs mb-1">Subtotal</div>
+                          <div className="text-white font-semibold">
+                            {publisherPayload.currency || 'USD'} {publisherPayload.subtotal?.toFixed(2) || '0.00'}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-white/60 text-xs mb-1">Tax ({publisherPayload.taxRate || 0}%)</div>
+                          <div className="text-white font-semibold">
+                            {publisherPayload.currency || 'USD'} {publisherPayload.tax?.toFixed(2) || '0.00'}
+                          </div>
+                        </div>
+                        <div className="col-span-2 md:col-span-1">
+                          <div className="text-white/60 text-xs mb-1">Total</div>
+                          <div className="text-purple-300 font-bold text-lg">
+                            {publisherPayload.currency || 'USD'} {publisherPayload.total?.toFixed(2) || '0.00'}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-white/60 text-xs mb-1">Currency</div>
+                          <div className="text-white font-semibold">{publisherPayload.currency || 'USD'}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* GL Mapping & Policy Status */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-lg border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-4 backdrop-blur-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Hash className="w-4 h-4 text-purple-300" />
+                          <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">GL Mapping</span>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-white">
+                            <span className="text-white/60 text-sm">Code: </span>
+                            <span className="font-semibold">{publisherPayload.glCode || 'N/A'}</span>
+                          </div>
+                          <div className="text-white">
+                            <span className="text-white/60 text-sm">Category: </span>
+                            <span className="font-semibold">{publisherPayload.glCategory || 'N/A'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="rounded-lg border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-4 backdrop-blur-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Shield className="w-4 h-4 text-purple-300" />
+                          <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">Policy Status</span>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${publisherPayload.policyApproved ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                            <span className="text-white text-sm">
+                              {publisherPayload.policyApproved ? 'Approved' : 'Requires Review'}
+                            </span>
+                          </div>
+                          {publisherPayload.policyViolations > 0 && (
+                            <div className="text-white/60 text-xs">
+                              {publisherPayload.policyViolations} violation(s) detected
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Line Items */}
+                    {publisherPayload.lineItems && publisherPayload.lineItems.length > 0 && (
+                      <div className="rounded-lg border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-4 backdrop-blur-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                          <FileText className="w-4 h-4 text-purple-300" />
+                          <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">
+                            Line Items ({publisherPayload.lineItems.length})
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-purple-500/30">
+                                <th className="text-left text-purple-300 py-2 px-2">#</th>
+                                <th className="text-left text-purple-300 py-2 px-2">Description</th>
+                                <th className="text-right text-purple-300 py-2 px-2">Quantity</th>
+                                <th className="text-right text-purple-300 py-2 px-2">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {publisherPayload.lineItems.map((item, idx) => (
+                                <tr key={idx} className="border-b border-purple-500/10">
+                                  <td className="text-white/80 py-2 px-2">{item.row || idx + 1}</td>
+                                  <td className="text-white/80 py-2 px-2">{item.description || 'N/A'}</td>
+                                  <td className="text-white/80 text-right py-2 px-2">{item.quantity || 'N/A'}</td>
+                                  <td className="text-white font-semibold text-right py-2 px-2">
+                                    {publisherPayload.currency || 'USD'} {item.amount?.toFixed(2) || '0.00'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Submission Target */}
+                    <div className="rounded-lg border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-4 backdrop-blur-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Send className="w-4 h-4 text-purple-300" />
+                        <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">Ready for Submission</span>
+                      </div>
+                      <p className="text-white/70 text-sm">
+                        This data is formatted and ready to be submitted to external systems (e.g., Xero, QuickBooks, Google Sheets).
+                      </p>
+                      {publisherPayload.timestamp && (
+                        <p className="text-white/50 text-xs mt-2">
+                          Processed: {new Date(publisherPayload.timestamp).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
               {/* Summary Stats */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ delay: agenticDecisions.length * 0.1 + 0.2 }}
+                transition={{ delay: (agenticDecisions.length * 0.1) + (publisherPayload ? 0.4 : 0.2) }}
                 className="mt-6 pt-6 border-t border-emerald-500/20"
               >
                 <div className="grid grid-cols-2 gap-4">

@@ -26,6 +26,7 @@ export default function App() {
   const [qualityConfidence, setQualityConfidence] = useState(null);
   const [agenticDecisions, setAgenticDecisions] = useState([]);
   const [workflowComplete, setWorkflowComplete] = useState(false);
+  const [publisherPayload, setPublisherPayload] = useState(null);
   const [humanIntervention, setHumanIntervention] = useState(null);
   const eventSourceRef = useRef(null);
   
@@ -61,6 +62,7 @@ export default function App() {
     setQualityConfidence(null);
     setAgenticDecisions([]);
     setWorkflowComplete(false);
+    setPublisherPayload(null);
     setHumanIntervention(null);
   };
 
@@ -316,6 +318,10 @@ export default function App() {
         if (data.agenticDecisions) {
           setAgenticDecisions(data.agenticDecisions);
         }
+        // Store publisher payload for display
+        if (data.payload) {
+          setPublisherPayload(data.payload);
+        }
         setWorkflowComplete(true);
         break;
 
@@ -469,6 +475,7 @@ export default function App() {
         {/* Executive Summary Panel */}
         <ExecutiveSummary 
           agenticDecisions={agenticDecisions}
+          publisherPayload={publisherPayload}
           isVisible={workflowComplete}
         />
       </div>
