@@ -358,7 +358,7 @@ export default function App() {
             Agentic Invoice Processing
           </h1>
           <p className="text-white/60 text-lg">
-            Multi-agent workflow with self-healing capabilities
+            Multi-agent workflow Demo for Enterprise Agentic AI Transformation
           </p>
         </div>
 
