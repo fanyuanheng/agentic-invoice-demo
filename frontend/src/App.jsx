@@ -601,6 +601,37 @@ export default function App() {
           }
         }}
       />
+
+      {/* Footer */}
+      <footer className="relative z-10 mt-16 pb-8">
+        <div className="max-w-7xl mx-auto px-8">
+          <div className="border-t border-white/10 pt-8">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="text-center md:text-left">
+                <p className="text-white/60 text-sm">
+                  Created by <span className="text-white/80 font-medium">Yuanheng Fan</span>
+                </p>
+              </div>
+              <div className="text-center md:text-right">
+                <p className="text-white/60 text-sm">
+                  Licensed under{' '}
+                  <a
+                    href="https://opensource.org/licenses/MIT"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-300 hover:text-purple-200 underline transition-colors"
+                  >
+                    MIT License
+                  </a>
+                </p>
+                <p className="text-white/40 text-xs mt-1">
+                  © {new Date().getFullYear()} Agentic Invoice Demo. Open Source.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

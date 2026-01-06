@@ -10,7 +10,9 @@
     "dev:backend": "cd backend && npm run dev"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "author": "Yuanheng Fan",
+  "license": "MIT"
 }
+
+
 
