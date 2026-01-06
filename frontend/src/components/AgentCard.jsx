@@ -289,7 +289,7 @@ function ConfidenceMeter({ confidence }) {
   );
 }
 
-export default function AgentCard({ agentName, isActive, thoughtStream, status, isFeedbackLoop, confidence }) {
+export default function AgentCard({ agentName, stepNumber, isActive, thoughtStream, status, isFeedbackLoop, confidence }) {
   const Icon = agentIcons[agentName] || FileCheck;
   const gradient = agentColors[agentName] || 'from-gray-500/20 to-gray-600/20';
 
@@ -315,28 +315,122 @@ export default function AgentCard({ agentName, isActive, thoughtStream, status, 
       {/* Glassmorphism overlay */}
       <div className="absolute inset-0 bg-white/5 backdrop-blur-sm" />
       
+      {/* Step Number Badge */}
+      <div className="absolute top-4 right-4 z-30">
+        <motion.div
+          className={`relative w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${
+            isActive
+              ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg shadow-purple-500/50'
+              : 'bg-white/10 backdrop-blur-md border border-white/20 text-white/80'
+          }`}
+          animate={isActive ? {
+            scale: [1, 1.1, 1],
+          } : {}}
+          transition={{
+            duration: 1.5,
+            repeat: isActive ? Infinity : 0,
+            ease: 'easeInOut'
+          }}
+        >
+          {stepNumber}
+          {isActive && (
+            <motion.div
+              className="absolute inset-0 rounded-full border-2 border-purple-400/60"
+              animate={{
+                scale: [1, 1.3, 1],
+                opacity: [0.8, 0, 0.8],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: 'easeOut'
+              }}
+            />
+          )}
+        </motion.div>
+      </div>
+      
+      {/* Agent Badge/Header Section */}
+      <div className="relative bg-gradient-to-r from-black/30 to-transparent border-b border-white/10 pb-4 pt-6 px-6">
+        <div className="flex items-center gap-4">
+          {/* Agent Avatar/Icon */}
+          <motion.div 
+            className={`relative p-3 rounded-xl bg-gradient-to-br ${
+              isActive 
+                ? 'from-white/30 to-white/10 shadow-lg shadow-white/20' 
+                : 'from-white/10 to-white/5'
+            } backdrop-blur-md border ${
+              isActive ? 'border-white/30' : 'border-white/10'
+            }`}
+            animate={isActive ? {
+              rotate: [0, 5, -5, 0],
+            } : {}}
+            transition={{
+              duration: 2,
+              repeat: isActive ? Infinity : 0,
+              ease: 'easeInOut'
+            }}
+          >
+            <Icon className={`w-7 h-7 ${
+              isActive ? 'text-white drop-shadow-lg' : 'text-white/70'
+            }`} />
+            {/* Active pulse indicator */}
+            {isActive && (
+              <motion.div
+                className="absolute inset-0 rounded-xl border-2 border-white/40"
+                animate={{
+                  scale: [1, 1.1, 1],
+                  opacity: [0.5, 0.8, 0.5],
+                }}
+                transition={{
+                  duration: 1.5,
+                  repeat: Infinity,
+                  ease: 'easeInOut'
+                }}
+              />
+            )}
+          </motion.div>
+          
+          {/* Agent Name and Status */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className={`text-xl font-bold ${
+                isActive ? 'text-white drop-shadow-md' : 'text-white/90'
+              }`}>
+                {agentName}
+              </h3>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-white/70 font-medium">
+                Agent
+              </span>
+            </div>
+            {status && (
+              <div className="flex items-center gap-2">
+                <motion.div
+                  className={`w-2 h-2 rounded-full ${
+                    status === 'Complete' ? 'bg-green-400' :
+                    status === 'Processing...' || status === 'Starting...' ? 'bg-blue-400' :
+                    status.includes('Waiting') ? 'bg-yellow-400' :
+                    'bg-gray-400'
+                  }`}
+                  animate={isActive && status !== 'Complete' ? {
+                    scale: [1, 1.3, 1],
+                    opacity: [1, 0.7, 1],
+                  } : {}}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity,
+                    ease: 'easeInOut'
+                  }}
+                />
+                <span className="text-xs text-white/70 font-medium">{status}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      
       {/* Content */}
       <div className="relative p-6 h-full flex flex-col">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-4 flex-shrink-0">
-          <div className={`p-2 rounded-lg bg-white/10 backdrop-blur-sm ${
-            isActive ? 'bg-white/20' : ''
-          }`}>
-            <Icon className={`w-6 h-6 ${
-              isActive ? 'text-white' : 'text-white/70'
-            }`} />
-          </div>
-          <h3 className={`text-xl font-semibold ${
-            isActive ? 'text-white' : 'text-white/80'
-          }`}>
-            {agentName}
-          </h3>
-          {status && (
-            <span className="ml-auto text-xs px-2 py-1 rounded-full bg-white/10 text-white/90">
-              {status}
-            </span>
-          )}
-        </div>
 
         {/* Confidence Meter - Only for Quality Agent */}
         {agentName === 'Quality' && (
@@ -345,12 +439,20 @@ export default function AgentCard({ agentName, isActive, thoughtStream, status, 
 
         {/* Thought Stream - Fixed height with scrolling */}
         <div className="flex-1 bg-black/20 rounded-lg p-4 border border-white/5 overflow-hidden flex flex-col min-h-0">
-          <div className="text-xs text-white/60 mb-3 font-mono flex-shrink-0 font-semibold">Thought Stream:</div>
+          <div className="flex items-center gap-2 mb-3 flex-shrink-0">
+            <div className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" />
+            <div className="text-xs text-white/60 font-mono font-semibold uppercase tracking-wider">Thought Stream</div>
+          </div>
           <AutoScrollContainer content={thoughtStream}>
             {thoughtStream ? (
               <FormattedThoughtStream content={thoughtStream} />
             ) : (
-              <span className="text-white/40 italic">Waiting for agent activity...</span>
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-3">
+                  <Icon className="w-6 h-6 text-white/30" />
+                </div>
+                <span className="text-white/40 italic text-sm">Waiting for agent activity...</span>
+              </div>
             )}
           </AutoScrollContainer>
         </div>

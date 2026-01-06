@@ -384,65 +384,68 @@ export default function App() {
             />
           )}
           
-          {AGENTS.map((agent, index) => (
-            <div 
-              key={agent} 
-              className="relative z-10"
-              ref={agentRefs[agent]}
-            >
-              <AgentCard
-                agentName={agent}
-                isActive={activeAgent === agent}
-                thoughtStream={agentThoughts[agent]}
-                status={agentStatus[agent]}
-                isFeedbackLoop={showFeedbackLoop && (agent === 'Quality' || agent === 'Extraction')}
-                confidence={agent === 'Quality' ? qualityConfidence : null}
-              />
-              
-              {/* Feedback Loop Indicator - Quality to Extraction */}
-              {showFeedbackLoop && agent === 'Extraction' && (
-                <motion.div
-                  className="absolute -top-16 left-1/2 transform -translate-x-1/2 z-30"
-                  initial={{ opacity: 0, y: -20, scale: 0.8 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -20, scale: 0.8 }}
-                >
-                  <div className="flex flex-col items-center bg-red-500/30 backdrop-blur-md rounded-xl px-5 py-3 border-2 border-red-400/70 shadow-2xl shadow-red-500/50">
-                    <motion.div
-                      className="text-red-200 text-xs font-bold mb-2 uppercase tracking-wider"
-                      animate={{ opacity: [0.7, 1, 0.7] }}
-                      transition={{ duration: 1, repeat: Infinity }}
-                    >
-                      ⚠️ Correction Loop
-                    </motion.div>
-                    <motion.div
-                      animate={{ 
-                        x: [-8, 8, -8],
-                        scale: [1, 1.1, 1]
-                      }}
-                      transition={{ 
-                        duration: 1.5, 
-                        repeat: Infinity,
-                        ease: 'easeInOut'
-                      }}
-                    >
-                      <ArrowLeft 
-                        className="w-12 h-12 text-red-400 drop-shadow-lg" 
-                        strokeWidth={3}
-                      />
-                    </motion.div>
-                    <motion.div
-                      className="text-red-300 text-xs mt-2 text-center"
-                      animate={{ opacity: [0.6, 1, 0.6] }}
-                      transition={{ duration: 1.2, repeat: Infinity, delay: 0.3 }}
-                    >
-                      Quality → Extraction
-                    </motion.div>
-                  </div>
-                </motion.div>
-              )}
-            </div>
-          ))}
+          {AGENTS.map((agent, index) => {
+            return (
+              <div 
+                key={agent} 
+                className="relative z-10"
+                ref={agentRefs[agent]}
+              >
+                <AgentCard
+                  agentName={agent}
+                  stepNumber={index + 1}
+                  isActive={activeAgent === agent}
+                  thoughtStream={agentThoughts[agent]}
+                  status={agentStatus[agent]}
+                  isFeedbackLoop={showFeedbackLoop && (agent === 'Quality' || agent === 'Extraction')}
+                  confidence={agent === 'Quality' ? qualityConfidence : null}
+                />
+                
+                {/* Feedback Loop Indicator - Quality to Extraction */}
+                {showFeedbackLoop && agent === 'Extraction' && (
+                  <motion.div
+                    className="absolute -top-16 left-1/2 transform -translate-x-1/2 z-30"
+                    initial={{ opacity: 0, y: -20, scale: 0.8 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -20, scale: 0.8 }}
+                  >
+                    <div className="flex flex-col items-center bg-red-500/30 backdrop-blur-md rounded-xl px-5 py-3 border-2 border-red-400/70 shadow-2xl shadow-red-500/50">
+                      <motion.div
+                        className="text-red-200 text-xs font-bold mb-2 uppercase tracking-wider"
+                        animate={{ opacity: [0.7, 1, 0.7] }}
+                        transition={{ duration: 1, repeat: Infinity }}
+                      >
+                        ⚠️ Correction Loop
+                      </motion.div>
+                      <motion.div
+                        animate={{ 
+                          x: [-8, 8, -8],
+                          scale: [1, 1.1, 1]
+                        }}
+                        transition={{ 
+                          duration: 1.5, 
+                          repeat: Infinity,
+                          ease: 'easeInOut'
+                        }}
+                      >
+                        <ArrowLeft 
+                          className="w-12 h-12 text-red-400 drop-shadow-lg" 
+                          strokeWidth={3}
+                        />
+                      </motion.div>
+                      <motion.div
+                        className="text-red-300 text-xs mt-2 text-center"
+                        animate={{ opacity: [0.6, 1, 0.6] }}
+                        transition={{ duration: 1.2, repeat: Infinity, delay: 0.3 }}
+                      >
+                        Quality → Extraction
+                      </motion.div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Status Footer */}
