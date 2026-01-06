@@ -53,12 +53,13 @@ async function intakeAgent(imageData, mimeType, imageBuffer, model, res) {
   sendSSE(res, 'agent_start', { agent: 'Intake Agent', step: 1 });
   
   // Reasoning phase
-  const reasoningPrompt = `Analyze this invoice image file. Check:
-1. File integrity - is the image valid and readable?
-2. Duplicate detection - does this look like a file we've seen before? (Check for similar layouts, dates, vendor names)
-3. Image quality - is the image blurry, too dark, or have poor resolution that might affect extraction?
+  const reasoningPrompt = `Analyze this image file. Check:
+1. Is this a valid invoice? - Does the image contain invoice-related content (vendor name, invoice number, dates, line items, totals, etc.)? If this is NOT an invoice or doesn't contain invoice information, mark as error.
+2. File integrity - is the image valid and readable?
+3. Duplicate detection - does this look like a file we've seen before? (Check for similar layouts, dates, vendor names)
+4. Image quality - is the image blurry, too dark, or have poor resolution that might affect extraction? If quality is too poor to reliably extract data, mark as error.
 
-Think through each of these checks systematically.`;
+Think through each of these checks systematically. Most importantly: if this is NOT a valid invoice document, you must return status "error".`;
   
   const imagePart = {
     inlineData: {
@@ -75,18 +76,27 @@ Think through each of these checks systematically.`;
   const actionPrompt = `Based on your reasoning, provide a JSON response with:
 {
   "status": "valid" | "warning" | "error",
+  "isValidInvoice": boolean (true if this is recognized as a valid invoice document, false otherwise),
   "fileIntegrity": boolean,
   "isDuplicate": boolean,
   "isBlurry": boolean,
+  "qualityTooPoor": boolean (true if image quality is too poor to reliably extract data),
   "warnings": [array of warning messages],
+  "errorMessage": string (required if status is "error", explaining why the image was rejected),
   "sanitized": true
-}`;
+}
+
+IMPORTANT: 
+- Set status to "error" if isValidInvoice is false (image is not a valid invoice)
+- Set status to "error" if qualityTooPoor is true (image quality is too bad to process)
+- Set status to "warning" if there are minor issues but the invoice can still be processed
+- Set status to "valid" only if the image is a valid invoice with acceptable quality`;
   
   const actionResult = await model.generateContent([actionPrompt, imagePart]);
   const actionText = actionResult.response.text();
   
   // Try to extract JSON from response
-  let intakeResult = { status: 'valid', fileIntegrity: true, isDuplicate: false, isBlurry: false, warnings: [], sanitized: true };
+  let intakeResult = { status: 'valid', isValidInvoice: true, fileIntegrity: true, isDuplicate: false, isBlurry: false, qualityTooPoor: false, warnings: [], sanitized: true };
   try {
     const jsonMatch = actionText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -94,13 +104,33 @@ Think through each of these checks systematically.`;
     }
   } catch (e) {
     // If JSON parsing fails, create result from text
-    if (actionText.toLowerCase().includes('duplicate') || actionText.toLowerCase().includes('seen before')) {
+    const lowerText = actionText.toLowerCase();
+    if (lowerText.includes('not an invoice') || lowerText.includes('not a valid invoice') || lowerText.includes('not invoice') || lowerText.includes('invalid invoice')) {
+      intakeResult.isValidInvoice = false;
+      intakeResult.status = 'error';
+      intakeResult.errorMessage = 'Image is not recognized as a valid invoice document';
+    }
+    if (lowerText.includes('duplicate') || lowerText.includes('seen before')) {
       intakeResult.isDuplicate = true;
       intakeResult.warnings.push('Possible duplicate invoice detected');
     }
-    if (actionText.toLowerCase().includes('blurry') || actionText.toLowerCase().includes('unclear')) {
+    if (lowerText.includes('blurry') || lowerText.includes('unclear') || lowerText.includes('poor quality') || lowerText.includes('too poor')) {
       intakeResult.isBlurry = true;
-      intakeResult.warnings.push('Image quality may affect extraction accuracy');
+      intakeResult.qualityTooPoor = true;
+      intakeResult.status = 'error';
+      intakeResult.errorMessage = 'Image quality is too poor to reliably extract invoice data';
+    }
+  }
+  
+  // Ensure error status is set correctly based on validation
+  if (intakeResult.isValidInvoice === false || intakeResult.qualityTooPoor === true) {
+    intakeResult.status = 'error';
+    if (!intakeResult.errorMessage) {
+      if (intakeResult.isValidInvoice === false) {
+        intakeResult.errorMessage = 'Image is not recognized as a valid invoice document';
+      } else if (intakeResult.qualityTooPoor === true) {
+        intakeResult.errorMessage = 'Image quality is too poor to reliably extract invoice data';
+      }
     }
   }
   
@@ -676,6 +706,29 @@ app.post('/api/workflow/stream', async (req, res) => {
 
     // Agent 1: Intake Agent
     const { intakeResult } = await intakeAgent(imageData, mimeType, imageBuffer, model, res);
+
+    // Check if intake agent detected errors - stop workflow if so
+    if (intakeResult.status === 'error') {
+      const errorMessage = intakeResult.errorMessage || 
+        (intakeResult.isValidInvoice === false 
+          ? 'Image is not recognized as a valid invoice document' 
+          : 'Image quality is too poor to reliably extract invoice data');
+      
+      sendSSE(res, 'intake_error', {
+        agent: 'Intake Agent',
+        message: errorMessage,
+        result: intakeResult
+      });
+      
+      sendSSE(res, 'workflow_stopped', {
+        reason: errorMessage,
+        stage: 'intake'
+      });
+      
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      res.end();
+      return;
+    }
 
     // Agent 2: Extraction Agent
     const { extractedData } = await extractionAgent(imageData, mimeType, model, res);

@@ -29,6 +29,7 @@ export default function App() {
   const [publisherPayload, setPublisherPayload] = useState(null);
   const [humanIntervention, setHumanIntervention] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [intakeError, setIntakeError] = useState(null);
   const eventSourceRef = useRef(null);
   
   // Create refs for each agent card
@@ -66,6 +67,7 @@ export default function App() {
     setPublisherPayload(null);
     setHumanIntervention(null);
     setSelectedFile(null);
+    setIntakeError(null);
     setIsProcessing(false);
     
     // Close any existing SSE connection
@@ -297,9 +299,30 @@ export default function App() {
         }
         break;
 
+      case 'intake_error':
+        setIsProcessing(false);
+        setActiveAgent(null);
+        setIntakeError({
+          message: data.message || 'Intake agent detected an error',
+          result: data.result
+        });
+        setAgentStatus(prev => ({ ...prev, 'Intake': 'Error' }));
+        setAgentThoughts(prev => ({
+          ...prev,
+          'Intake': (prev['Intake'] || '') + `\n\n[ERROR] ${data.message}\n`
+        }));
+        break;
+
       case 'workflow_stopped':
         setIsProcessing(false);
         setActiveAgent(null);
+        // If workflow stopped at intake stage, ensure error is set
+        if (data.stage === 'intake') {
+          setIntakeError(prev => prev || {
+            message: data.reason || 'Workflow stopped due to intake error',
+            result: null
+          });
+        }
         break;
 
       case 'agent_complete':
@@ -388,8 +411,39 @@ export default function App() {
               }
             }}
           />
+          
+          {/* Intake Error Message */}
+          {intakeError && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mt-4 p-6 rounded-xl bg-red-500/20 border-2 border-red-400/50 backdrop-blur-sm"
+            >
+              <div className="flex items-start gap-4">
+                <div className="flex-shrink-0">
+                  <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-red-200 font-semibold text-lg mb-2">Intake Agent Error</h3>
+                  <p className="text-red-100 mb-4">{intakeError.message}</p>
+                  <motion.button
+                    onClick={clearAgentStates}
+                    className="px-6 py-2 rounded-lg bg-red-500/30 border border-red-400/50 text-white font-medium hover:bg-red-500/40 transition-all duration-300"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    Reset & Try Again
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+          
           {/* Start Over Button - shown when file is selected or workflow is complete */}
-          {(selectedFile || workflowComplete) && !isProcessing && (
+          {(selectedFile || workflowComplete) && !isProcessing && !intakeError && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
