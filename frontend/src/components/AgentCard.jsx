@@ -34,7 +34,7 @@ export default function AgentCard({ agentName, isActive, thoughtStream, status, 
     <motion.div
       className={`relative rounded-2xl bg-gradient-to-br ${gradient} backdrop-blur-xl border ${
         isFeedbackLoop ? 'border-red-400/50' : 'border-white/10'
-      } shadow-2xl overflow-hidden`}
+      } shadow-2xl overflow-hidden h-[400px]`}
       animate={isActive ? {
         scale: [1, 1.02, 1],
         boxShadow: [
@@ -55,7 +55,7 @@ export default function AgentCard({ agentName, isActive, thoughtStream, status, 
       {/* Content */}
       <div className="relative p-6 h-full flex flex-col">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-3 mb-4 flex-shrink-0">
           <div className={`p-2 rounded-lg bg-white/10 backdrop-blur-sm ${
             isActive ? 'bg-white/20' : ''
           }`}>
@@ -75,10 +75,10 @@ export default function AgentCard({ agentName, isActive, thoughtStream, status, 
           )}
         </div>
 
-        {/* Thought Stream */}
-        <div className="flex-1 min-h-[200px] bg-black/20 rounded-lg p-4 border border-white/5 overflow-y-auto">
-          <div className="text-xs text-white/60 mb-2 font-mono">Thought Stream:</div>
-          <div className="font-mono text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
+        {/* Thought Stream - Fixed height with scrolling */}
+        <div className="flex-1 bg-black/20 rounded-lg p-4 border border-white/5 overflow-hidden flex flex-col min-h-0">
+          <div className="text-xs text-white/60 mb-2 font-mono flex-shrink-0">Thought Stream:</div>
+          <div className="font-mono text-sm text-white/90 whitespace-pre-wrap leading-relaxed overflow-y-auto flex-1 min-h-0">
             {thoughtStream || (
               <span className="text-white/40 italic">Waiting for agent activity...</span>
             )}
