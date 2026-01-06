@@ -5,7 +5,7 @@ export default function HumanIntervention({ intervention, onDecision }) {
   if (!intervention) return null;
 
   try {
-    const { errors, extractedData, interventionId, message } = intervention || {};
+    const { errors, violations, correctiveActions, extractedData, interventionId, message } = intervention || {};
     
     // Safety check - ensure we have required data
     if (!interventionId) {
@@ -71,7 +71,7 @@ export default function HumanIntervention({ intervention, onDecision }) {
                   Human Intervention Required
                 </h2>
                 <p className="text-red-300 text-sm">
-                  {message || 'Quality Agent detected calculation errors'}
+                  {message || 'Agent detected issues that require human review'}
                 </p>
               </div>
             </div>
@@ -79,30 +79,49 @@ export default function HumanIntervention({ intervention, onDecision }) {
 
           {/* Content */}
           <div className="p-6 space-y-6">
-            {/* Errors List */}
-            <div>
-              <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                <XCircle className="w-5 h-5 text-red-400" />
-                <span>Calculation Errors Detected</span>
-              </h3>
-              <div className="space-y-2">
-                {errors && Array.isArray(errors) && errors.length > 0 ? (
-                  errors.map((error, index) => (
-                    <motion.div
-                      key={index}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg"
-                    >
-                      <p className="text-red-200 text-sm">{String(error || 'Unknown error')}</p>
-                    </motion.div>
-                  ))
-                ) : (
-                  <p className="text-white/60 text-sm">No specific errors listed</p>
-                )}
+            {/* Errors/Violations List */}
+            {(errors && errors.length > 0) || (violations && violations.length > 0) ? (
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+                  <XCircle className="w-5 h-5 text-red-400" />
+                  <span>{errors && errors.length > 0 ? 'Calculation Errors Detected' : 'Policy Violations Detected'}</span>
+                </h3>
+                <div className="space-y-2">
+                  {errors && Array.isArray(errors) && errors.length > 0 ? (
+                    errors.map((error, index) => (
+                      <motion.div
+                        key={`error-${index}`}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg"
+                      >
+                        <p className="text-red-200 text-sm">{String(error || 'Unknown error')}</p>
+                      </motion.div>
+                    ))
+                  ) : violations && Array.isArray(violations) && violations.length > 0 ? (
+                    violations.map((violation, index) => (
+                      <motion.div
+                        key={`violation-${index}`}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg"
+                      >
+                        <p className="text-orange-200 text-sm font-semibold mb-1">{String(violation || 'Unknown violation')}</p>
+                        {correctiveActions && correctiveActions[index] && (
+                          <p className="text-orange-300/80 text-xs italic">
+                            Suggested: {correctiveActions[index].action || 'Review required'}
+                          </p>
+                        )}
+                      </motion.div>
+                    ))
+                  ) : (
+                    <p className="text-white/60 text-sm">No specific issues listed</p>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             {/* Extracted Data Summary */}
             {extractedData && (

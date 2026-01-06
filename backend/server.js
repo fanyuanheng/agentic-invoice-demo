@@ -177,7 +177,7 @@ Be precise with numbers. Extract exactly what you see.`;
 }
 
 // Agent 3: Policy Agent
-async function policyAgent(extractedData, model, res) {
+async function policyAgent(extractedData, model, res, interventionId = null) {
   sendSSE(res, 'agent_start', { agent: 'Policy Agent', step: 3 });
   
   // Mock policy rules
@@ -217,6 +217,9 @@ Think about which policies apply to this invoice and what the consequences would
   const actionPrompt = `For each policy violation, suggest a corrective action. Violations: ${violations.join(', ')}. Invoice total: $${extractedData.total}.`;
   
   let correctiveActions = [];
+  let requiresIntervention = false;
+  let interventionData = null;
+  
   if (violations.length > 0) {
     const actionResult = await model.generateContent([actionPrompt]);
     const actionText = actionResult.response.text();
@@ -232,20 +235,65 @@ Think about which policies apply to this invoice and what the consequences would
       }
       return { violation, action: actionText.includes('CFO') ? 'Escalate to CFO' : 'Review required' };
     });
+    
+    // Flag for human intervention
+    requiresIntervention = true;
+    interventionData = {
+      violations: Array.isArray(violations) ? violations : [],
+      correctiveActions: correctiveActions,
+      extractedData: {
+        vendor: extractedData.vendor,
+        invoiceNumber: extractedData.invoiceNumber,
+        date: extractedData.date,
+        subtotal: extractedData.subtotal,
+        tax: extractedData.tax,
+        total: extractedData.total,
+        lineItems: extractedData.lineItems
+      }
+    };
+    
+    sendSSE(res, 'agent_action', { 
+      agent: 'Policy Agent', 
+      message: `Found ${violations.length} policy violation(s). Flagging for human-in-the-loop approval.` 
+    });
+    
+    // Send human intervention required event
+    if (!interventionId) {
+      console.error('Policy Agent: interventionId is missing when violations detected');
+      sendSSE(res, 'error', { 
+        agent: 'Policy Agent', 
+        message: 'Failed to create intervention - missing interventionId' 
+      });
+    } else {
+      sendSSE(res, 'human_intervention_required', {
+        agent: 'Policy Agent',
+        interventionId: interventionId,
+        violations: violations,
+        correctiveActions: correctiveActions,
+        extractedData: interventionData.extractedData || {},
+        message: 'Policy Agent detected policy violations that require human approval'
+      });
+    }
   }
   
   const policyResult = {
     checks,
     violations,
     correctiveActions,
-    approved: violations.length === 0
+    approved: violations.length === 0,
+    requiresIntervention: requiresIntervention
   };
   
   sendSSE(res, 'agent_result', { agent: 'Policy Agent', result: policyResult });
   
-  sendSSE(res, 'agent_complete', { agent: 'Policy Agent' });
+  // Only mark as complete if no intervention is required
+  if (!requiresIntervention) {
+    sendSSE(res, 'agent_complete', { agent: 'Policy Agent' });
+  } else {
+    sendSSE(res, 'agent_action', { agent: 'Policy Agent', message: 'Waiting for human review and approval...' });
+  }
   
-  return { policyResult, reasoning };
+  return { policyResult, reasoning, requiresIntervention, interventionData };
 }
 
 // Agent 4: GL Mapper Agent
@@ -631,8 +679,36 @@ app.post('/api/workflow/stream', async (req, res) => {
     // Agent 2: Extraction Agent
     const { extractedData } = await extractionAgent(imageData, mimeType, model, res);
 
-    // Agent 3: Policy Agent
-    const { policyResult } = await policyAgent(extractedData, model, res);
+    // Generate unique intervention ID for Policy Agent
+    const policyInterventionId = `intervention_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Agent 3: Policy Agent (may flag for human intervention)
+    const { policyResult, requiresIntervention: policyRequiresIntervention, interventionData: policyInterventionData } = await policyAgent(extractedData, model, res, policyInterventionId);
+    
+    // If policy intervention is required, pause workflow and wait for user decision
+    if (policyRequiresIntervention && policyInterventionData) {
+      // Store workflow state for resumption
+      pendingInterventions.set(policyInterventionId, {
+        extractedData,
+        policyResult,
+        agenticDecisions,
+        imageData,
+        mimeType,
+        model,
+        res,
+        interventionData: policyInterventionData,
+        stage: 'policy' // Track which stage we're at
+      });
+      
+      // Send intervention ID to frontend
+      sendSSE(res, 'intervention_pending', {
+        interventionId: policyInterventionId,
+        message: 'Workflow paused. Waiting for policy approval...'
+      });
+      
+      // Don't proceed until user makes a decision
+      return;
+    }
 
     // Agent 4: GL Mapper Agent
     const { glMapping, usedHistoricalContext } = await glMapperAgent(extractedData, model, res);
@@ -665,7 +741,8 @@ app.post('/api/workflow/stream', async (req, res) => {
         mimeType,
         model,
         res,
-        interventionData
+        interventionData,
+        stage: 'quality' // Track which stage we're at
       });
       
       // Send intervention ID to frontend
@@ -720,44 +797,112 @@ app.post('/api/workflow/intervention', async (req, res) => {
       return res.status(404).json({ error: 'Intervention not found or already processed' });
     }
 
-    const { extractedData, glMapping, policyResult, agenticDecisions, imageData, mimeType, model, res: originalRes, interventionData: storedInterventionData } = intervention;
+    const { extractedData, glMapping, policyResult, agenticDecisions, imageData, mimeType, model, res: originalRes, interventionData: storedInterventionData, stage } = intervention;
 
     if (decision === 'accept') {
-      // User accepted the data despite errors - proceed with workflow
-      sendSSE(originalRes, 'intervention_decision', {
-        decision: 'accepted',
-        message: 'User accepted data with errors. Proceeding with workflow...'
-      });
+      if (stage === 'policy') {
+        // Policy intervention - user approved policy violations
+        sendSSE(originalRes, 'intervention_decision', {
+          decision: 'accepted',
+          message: 'User approved policy violations. Proceeding with workflow...'
+        });
 
-      // Mark Quality Agent as complete now that user has made decision
-      sendSSE(originalRes, 'agent_complete', { agent: 'Quality Agent' });
+        // Mark Policy Agent as complete
+        sendSSE(originalRes, 'agent_complete', { agent: 'Policy Agent' });
 
-      // Track the human decision
-      agenticDecisions.push({
-        agent: 'Quality',
-        decision: 'Human-in-the-loop: Accepted data with errors',
-        details: `User reviewed and accepted invoice data despite ${storedInterventionData.errors.length} calculation error(s). Original total: $${extractedData.total}`,
-        impact: 'Workflow continued with user approval'
-      });
+        // Track the human decision
+        agenticDecisions.push({
+          agent: 'Policy',
+          decision: 'Human-in-the-loop: Approved policy violations',
+          details: `User reviewed and approved invoice despite ${storedInterventionData.violations?.length || 0} policy violation(s). Invoice total: $${extractedData.total}`,
+          impact: 'Workflow continued with user approval'
+        });
 
-      // Continue with Publisher Agent
-      await publisherAgent(extractedData, glMapping, policyResult, model, originalRes, agenticDecisions);
+        // Continue with GL Mapper Agent and rest of workflow
+        const { glMapping: continuedGlMapping, usedHistoricalContext } = await glMapperAgent(extractedData, model, originalRes);
+        
+        // Track GL mapping decision if historical context was used
+        if (usedHistoricalContext) {
+          agenticDecisions.push({
+            agent: 'GL Mapper',
+            decision: 'Automated GL mapping based on historical context',
+            details: `Mapped to ${continuedGlMapping.glCategory} (${continuedGlMapping.glCode}) using historical patterns and vendor context`,
+            confidence: continuedGlMapping.confidence
+          });
+        }
+
+        // Generate unique intervention ID for Quality Agent
+        const qualityInterventionId = `intervention_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Continue with Quality Agent
+        const { finalData, requiresIntervention: qualityRequiresIntervention, interventionData: qualityInterventionData } = await qualityAgent(extractedData, model, originalRes, imageData, mimeType, qualityInterventionId);
+        
+        // If Quality Agent also requires intervention, pause again
+        if (qualityRequiresIntervention && qualityInterventionData) {
+          pendingInterventions.set(qualityInterventionId, {
+            extractedData: finalData,
+            glMapping: continuedGlMapping,
+            policyResult,
+            agenticDecisions,
+            imageData,
+            mimeType,
+            model,
+            res: originalRes,
+            interventionData: qualityInterventionData,
+            stage: 'quality'
+          });
+          
+          sendSSE(originalRes, 'intervention_pending', {
+            interventionId: qualityInterventionId,
+            message: 'Workflow paused. Waiting for quality review...'
+          });
+          return;
+        }
+
+        // Continue with Publisher Agent
+        await publisherAgent(finalData, continuedGlMapping, policyResult, model, originalRes, agenticDecisions);
+
+      } else {
+        // Quality intervention - user accepted the data despite errors
+        sendSSE(originalRes, 'intervention_decision', {
+          decision: 'accepted',
+          message: 'User accepted data with errors. Proceeding with workflow...'
+        });
+
+        // Mark Quality Agent as complete now that user has made decision
+        sendSSE(originalRes, 'agent_complete', { agent: 'Quality Agent' });
+
+        // Track the human decision
+        agenticDecisions.push({
+          agent: 'Quality',
+          decision: 'Human-in-the-loop: Accepted data with errors',
+          details: `User reviewed and accepted invoice data despite ${storedInterventionData.errors?.length || 0} calculation error(s). Original total: $${extractedData.total}`,
+          impact: 'Workflow continued with user approval'
+        });
+
+        // Continue with Publisher Agent
+        await publisherAgent(extractedData, glMapping, policyResult, model, originalRes, agenticDecisions);
+      }
 
       originalRes.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
       originalRes.end();
 
     } else if (decision === 'decline') {
       // User declined - stop workflow
+      const agentName = stage === 'policy' ? 'Policy Agent' : 'Quality Agent';
+      
       sendSSE(originalRes, 'intervention_decision', {
         decision: 'declined',
-        message: 'User declined to proceed. Workflow stopped.'
+        message: `User declined to proceed. Workflow stopped.`
       });
 
-      // Mark Quality Agent as complete (with declined status)
-      sendSSE(originalRes, 'agent_complete', { agent: 'Quality Agent' });
+      // Mark appropriate agent as complete (with declined status)
+      sendSSE(originalRes, 'agent_complete', { agent: agentName });
 
       sendSSE(originalRes, 'workflow_stopped', {
-        reason: 'User declined to proceed with data containing errors'
+        reason: stage === 'policy' 
+          ? 'User declined to approve policy violations' 
+          : 'User declined to proceed with data containing errors'
       });
 
       originalRes.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

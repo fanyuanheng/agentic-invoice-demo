@@ -229,16 +229,23 @@ export default function App() {
           
           const interventionData = {
             errors: Array.isArray(data.errors) ? data.errors.map(e => String(e || '')) : [],
+            violations: Array.isArray(data.violations) ? data.violations.map(v => String(v || '')) : [],
+            correctiveActions: Array.isArray(data.correctiveActions) ? data.correctiveActions : [],
             extractedData: sanitizedExtractedData,
             interventionId: String(data.interventionId),
-            message: String(data.message || 'Quality Agent detected calculation errors that require human review')
+            message: String(data.message || 'Agent detected issues that require human review')
           };
           
           setHumanIntervention(interventionData);
-          setAgentStatus(prev => ({ ...prev, 'Quality': 'Waiting for human decision...' }));
+          // Determine which agent needs intervention
+          const agentName = data.agent === 'Policy Agent' ? 'Policy' : 'Quality';
+          const issueType = interventionData.errors.length > 0 ? 'calculation error(s)' : 'policy violation(s)';
+          const issueCount = interventionData.errors.length || interventionData.violations.length;
+          
+          setAgentStatus(prev => ({ ...prev, [agentName]: 'Waiting for human decision...' }));
           setAgentThoughts(prev => ({
             ...prev,
-            'Quality': (prev['Quality'] || '') + `\n\n[Human Intervention Required] ${interventionData.errors.length} calculation error(s) detected. Waiting for human decision...\n`
+            [agentName]: (prev[agentName] || '') + `\n\n[Human Intervention Required] ${issueCount} ${issueType} detected. Waiting for human decision...\n`
           }));
         } catch (error) {
           console.error('Error handling human intervention:', error, data);
