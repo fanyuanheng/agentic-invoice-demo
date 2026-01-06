@@ -77,7 +77,10 @@ export default function App() {
     }
 
     try {
-      const response = await fetch('http://localhost:3001/api/workflow/stream', {
+      // Use environment variable if set, otherwise use relative URL (works in production)
+      // or localhost for development
+      const apiUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
+      const response = await fetch(`${apiUrl}/api/workflow/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -472,7 +475,10 @@ export default function App() {
         intervention={humanIntervention}
         onDecision={async (interventionId, decision) => {
           try {
-            const response = await fetch('http://localhost:3001/api/workflow/intervention', {
+            // Use environment variable if set, otherwise use relative URL (works in production)
+            // or localhost for development
+            const apiUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
+            const response = await fetch(`${apiUrl}/api/workflow/intervention`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
