@@ -2,10 +2,13 @@ import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Upload, File, X } from 'lucide-react';
 
-export default function FileDropZone({ onFileSelect, isProcessing }) {
+export default function FileDropZone({ onFileSelect, isProcessing, selectedFile: externalSelectedFile, onClearFile }) {
   const [isDragging, setIsDragging] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [internalSelectedFile, setInternalSelectedFile] = useState(null);
   const fileInputRef = useRef(null);
+  
+  // Use external selectedFile if provided, otherwise use internal state
+  const selectedFile = externalSelectedFile !== undefined ? externalSelectedFile : internalSelectedFile;
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -35,18 +38,24 @@ export default function FileDropZone({ onFileSelect, isProcessing }) {
   };
 
   const handleFile = (file) => {
-    setSelectedFile(file);
+    if (externalSelectedFile === undefined) {
+      setInternalSelectedFile(file);
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64 = e.target.result;
-      onFileSelect(base64);
+      onFileSelect(base64, file);
     };
     reader.readAsDataURL(file);
   };
 
   const handleRemove = (e) => {
     e.stopPropagation();
-    setSelectedFile(null);
+    if (externalSelectedFile !== undefined && onClearFile) {
+      onClearFile();
+    } else {
+      setInternalSelectedFile(null);
+    }
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }

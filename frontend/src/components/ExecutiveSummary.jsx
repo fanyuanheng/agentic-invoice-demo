@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, CheckCircle2, TrendingUp, Zap, FileText, DollarSign, Calendar, Building2, Hash, Shield, Send } from 'lucide-react';
+import { Sparkles, CheckCircle2, TrendingUp, Zap, FileText, DollarSign, Calendar, Building2, Hash, Shield, Send, RotateCcw } from 'lucide-react';
 
-export default function ExecutiveSummary({ agenticDecisions, publisherPayload, isVisible }) {
+export default function ExecutiveSummary({ agenticDecisions, publisherPayload, isVisible, onStartOver }) {
   if (!isVisible) {
     return null;
   }
@@ -368,6 +368,21 @@ export default function ExecutiveSummary({ agenticDecisions, publisherPayload, i
               }}
               style={{ boxShadow: '0 0 20px rgba(16, 185, 129, 0.5), 0 0 20px rgba(59, 130, 246, 0.5)' }}
             />
+            
+            {/* Start Over Button */}
+            {onStartOver && (
+              <div className="p-6 border-t border-emerald-500/20">
+                <motion.button
+                  onClick={onStartOver}
+                  className="w-full px-6 py-3 rounded-lg bg-gradient-to-r from-purple-500/20 to-indigo-500/20 border border-purple-400/30 text-white font-semibold hover:from-purple-500/30 hover:to-indigo-500/30 transition-all duration-300 flex items-center justify-center gap-2 backdrop-blur-sm"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <RotateCcw className="w-5 h-5" />
+                  Start Over
+                </motion.button>
+              </div>
+            )}
           </div>
         </motion.div>
       )}

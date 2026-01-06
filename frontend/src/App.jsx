@@ -28,6 +28,7 @@ export default function App() {
   const [workflowComplete, setWorkflowComplete] = useState(false);
   const [publisherPayload, setPublisherPayload] = useState(null);
   const [humanIntervention, setHumanIntervention] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
   const eventSourceRef = useRef(null);
   
   // Create refs for each agent card
@@ -64,12 +65,20 @@ export default function App() {
     setWorkflowComplete(false);
     setPublisherPayload(null);
     setHumanIntervention(null);
+    setSelectedFile(null);
+    setIsProcessing(false);
+    
+    // Close any existing SSE connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
   };
 
-  const handleFileSelect = async (base64Image) => {
+  const handleFileSelect = async (base64Image, file) => {
     if (isProcessing) return;
 
     clearAgentStates();
+    setSelectedFile(file);
     setIsProcessing(true);
     setShowFeedbackLoop(false);
 
@@ -371,7 +380,34 @@ export default function App() {
           <FileDropZone 
             onFileSelect={handleFileSelect} 
             isProcessing={isProcessing}
+            selectedFile={selectedFile}
+            onClearFile={() => {
+              setSelectedFile(null);
+              if (!isProcessing) {
+                clearAgentStates();
+              }
+            }}
           />
+          {/* Start Over Button - shown when file is selected or workflow is complete */}
+          {(selectedFile || workflowComplete) && !isProcessing && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 flex justify-center"
+            >
+              <motion.button
+                onClick={clearAgentStates}
+                className="px-6 py-3 rounded-lg bg-gradient-to-r from-purple-500/20 to-indigo-500/20 border border-purple-400/30 text-white font-semibold hover:from-purple-500/30 hover:to-indigo-500/30 transition-all duration-300 flex items-center gap-2 backdrop-blur-sm"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Start Over
+              </motion.button>
+            </motion.div>
+          )}
         </div>
 
         {/* Agent Cards Grid */}
@@ -475,6 +511,7 @@ export default function App() {
           agenticDecisions={agenticDecisions}
           publisherPayload={publisherPayload}
           isVisible={workflowComplete}
+          onStartOver={clearAgentStates}
         />
       </div>
 
