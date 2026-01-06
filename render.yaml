@@ -2,7 +2,7 @@ services:
   - type: web
     name: agentic-invoice-demo
     env: node
-    buildCommand: cd frontend && npm install && npm run build && cd ../backend && npm install
+    buildCommand: cd frontend && NODE_ENV=development npm install && npm run build && cd ../backend && npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
